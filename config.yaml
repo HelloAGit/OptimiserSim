@@ -1,0 +1,17 @@
+fireworks_api_key: "your-api-key-here"
+
+models:
+  - name: llama-3.1-8b
+    price_per_million: 0.20
+    accuracy_threshold: 0.75
+  - name: llama-3.1-70b
+    price_per_million: 0.90
+    accuracy_threshold: 0.90
+  - name: mixtral-8x7b
+    price_per_million: 0.50
+    accuracy_threshold: 0.85
+
+routing:
+  min_accuracy_threshold: 0.80
+  max_latency_ms: 1000
+  fallback_model: llama-3.1-70b
