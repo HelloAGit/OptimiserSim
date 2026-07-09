@@ -1,5 +1,5 @@
 fireworks:
-  api_key_env: "FIREWORKS_API_KEY"
+  api_key_env: "fw_HdzvL2VGGBWG8BeM99kytV"
   base_url: "https://api.fireworks.ai/inference/v1"
 
 models:
