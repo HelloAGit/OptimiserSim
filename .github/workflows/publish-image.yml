@@ -28,7 +28,6 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest
     env:
-      # static env you can keep here, dynamic values are set at runtime below
       SIGN_IMAGE: 'false'
     steps:
       - name: Checkout repository
@@ -42,8 +41,14 @@ jobs:
           echo "OWNER_LOWER=$OWNER_LOWER" >> $GITHUB_ENV
           echo "IMAGE_REPO=ghcr.io/$OWNER_LOWER/agent" >> $GITHUB_ENV
           echo "DOCKERHUB_REPO=docker.io/$OWNER_LOWER/agent" >> $GITHUB_ENV
-          echo "Computed IMAGE_REPO=$IMAGE_REPO and DOCKERHUB_REPO=$DOCKERHUB_REPO"
-      
+          # compute whether Docker Hub secrets are present (safe to reference secrets in a run step)
+          if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+            echo "DOCKERHUB_ENABLED=true" >> $GITHUB_ENV
+          else
+            echo "DOCKERHUB_ENABLED=false" >> $GITHUB_ENV
+          fi
+          echo "Computed IMAGE_REPO and DOCKERHUB_ENABLED=${DOCKERHUB_ENABLED:-}"
+
       - name: Set up QEMU (for multi-arch builds)
         uses: docker/setup-qemu-action@v2
 
@@ -58,7 +63,7 @@ jobs:
           password: ${{ secrets.CR_PAT || github.token }}
 
       - name: Optionally login to Docker Hub
-        if: secrets.DOCKERHUB_USERNAME && secrets.DOCKERHUB_TOKEN
+        if: env.DOCKERHUB_ENABLED == 'true'
         uses: docker/login-action@v3
         with:
           registry: docker.io
@@ -92,13 +97,11 @@ jobs:
           IMAGE_TAG="${{ steps.tag.outputs.IMAGE_TAG }}"
           FULL_TAG="${IMAGE_REPO}:${IMAGE_TAG}"
           echo "Validating image repo: $IMAGE_REPO and tag: $IMAGE_TAG"
-          # Fail on any uppercase letters
           if echo "$FULL_TAG" | grep -q '[A-Z]'; then
             echo "ERROR: Image name or tag contains uppercase letters. Docker image names and tags must be lowercase."
             echo "Offending: $FULL_TAG"
             exit 1
           fi
-          # Fail on characters outside allowed set: a-z 0-9 . _ - / :
           if echo "$FULL_TAG" | grep -Eq "[^a-z0-9._\\-/:]"; then
             echo "ERROR: Image name or tag contains invalid characters. Allowed: a-z, 0-9, ., _, -, /, :"
             echo "Offending: $FULL_TAG"
@@ -133,6 +136,6 @@ jobs:
           echo "Image pushed:"
           echo "  GHCR: ${IMAGE_REPO}:${{ steps.tag.outputs.IMAGE_TAG }}"
           echo "  GHCR latest: ${IMAGE_REPO}:latest"
-          if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ]; then
+          if [ "${DOCKERHUB_ENABLED:-false}" = "true" ]; then
             echo "  Docker Hub: ${DOCKERHUB_REPO}:${{ steps.tag.outputs.IMAGE_TAG }}"
           fi
