@@ -14,6 +14,14 @@ on:
       tag:
         description: 'Optional image tag (overrides SHA). Example: v1.2.3'
         required: false
+      build_context:
+        description: 'Optional build context (default: .)'
+        required: false
+        default: '.'
+      dockerfile_path:
+        description: 'Optional Dockerfile path relative to repo root (default: ./Dockerfile)'
+        required: false
+        default: './Dockerfile'
 
 permissions:
   contents: read
@@ -33,7 +41,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Compute image repo names (lowercase owner) and export to env
+      - name: Compute image repo names (lowercase owner), build variables and export to env
         run: |
           set -euo pipefail
           OWNER="${{ github.repository_owner }}"
@@ -41,13 +49,64 @@ jobs:
           echo "OWNER_LOWER=$OWNER_LOWER" >> $GITHUB_ENV
           echo "IMAGE_REPO=ghcr.io/$OWNER_LOWER/agent" >> $GITHUB_ENV
           echo "DOCKERHUB_REPO=docker.io/$OWNER_LOWER/agent" >> $GITHUB_ENV
+
+          # Build context and Dockerfile path (workflow_dispatch inputs may be empty for push events)
+          BUILD_CONTEXT_INPUT="${{ github.event.inputs.build_context }}"
+          DOCKERFILE_INPUT="${{ github.event.inputs.dockerfile_path }}"
+          if [ -z "$BUILD_CONTEXT_INPUT" ] || [ "$BUILD_CONTEXT_INPUT" = 'null' ]; then
+            BUILD_CONTEXT='.'
+          else
+            BUILD_CONTEXT="$BUILD_CONTEXT_INPUT"
+          fi
+          if [ -z "$DOCKERFILE_INPUT" ] || [ "$DOCKERFILE_INPUT" = 'null' ]; then
+            DOCKERFILE_PATH='./Dockerfile'
+          else
+            DOCKERFILE_PATH="$DOCKERFILE_INPUT"
+          fi
+          echo "BUILD_CONTEXT=$BUILD_CONTEXT" >> $GITHUB_ENV
+          echo "DOCKERFILE_PATH=$DOCKERFILE_PATH" >> $GITHUB_ENV
+
           # compute whether Docker Hub secrets are present (safe to reference secrets in a run step)
           if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
             echo "DOCKERHUB_ENABLED=true" >> $GITHUB_ENV
           else
             echo "DOCKERHUB_ENABLED=false" >> $GITHUB_ENV
           fi
-          echo "Computed IMAGE_REPO and DOCKERHUB_ENABLED=${DOCKERHUB_ENABLED:-}"
+          echo "Computed IMAGE_REPO=${IMAGE_REPO} BUILD_CONTEXT=${BUILD_CONTEXT} DOCKERHUB_ENABLED=${DOCKERHUB_ENABLED:-}"
+
+      - name: Show repo root (for debugging)
+        run: |
+          echo "Workspace: $GITHUB_WORKSPACE"
+          ls -la
+
+      - name: Verify build context and required files (fail fast)
+        run: |
+          set -euo pipefail
+          echo "Verifying build context: ${BUILD_CONTEXT} and Dockerfile: ${DOCKERFILE_PATH}"
+          if [ ! -d "${BUILD_CONTEXT}" ] && [ ! -f "${BUILD_CONTEXT}" ]; then
+            echo "ERROR: Build context '${BUILD_CONTEXT}' does not exist in the repository root."
+            exit 1
+          fi
+
+          if [ ! -f "${DOCKERFILE_PATH}" ]; then
+            echo "ERROR: Dockerfile not found at path: ${DOCKERFILE_PATH}"
+            echo "Update the workflow 'dockerfile_path' input or move your Dockerfile to this location."
+            exit 1
+          fi
+
+          # If Dockerfile references requirements.txt, ensure it exists in the context
+          if grep -qi "COPY .*requirements.txt" "${DOCKERFILE_PATH}"; then
+            REQ_RELATIVE="requirements.txt"
+            if [ ! -f "${BUILD_CONTEXT}/${REQ_RELATIVE}" ]; then
+              echo "ERROR: Dockerfile copies requirements.txt but ${BUILD_CONTEXT}/${REQ_RELATIVE} does not exist."
+              echo "Options: add requirements.txt to the build context, update the Dockerfile COPY path, or set build_context to the correct directory."
+              exit 1
+            fi
+          else
+            echo "Dockerfile does not COPY requirements.txt — skipping requirements check."
+          fi
+
+          echo "Build context verification passed."
 
       - name: Set up QEMU (for multi-arch builds)
         uses: docker/setup-qemu-action@v2
@@ -112,8 +171,8 @@ jobs:
       - name: Build and push (with registry cache)
         uses: docker/build-push-action@v4
         with:
-          context: .
-          file: ./Dockerfile
+          context: ${{ env.BUILD_CONTEXT }}
+          file: ${{ env.DOCKERFILE_PATH }}
           push: true
           platforms: linux/amd64,linux/arm64
           cache-from: type=registry,ref=${{ env.IMAGE_REPO }}:cache
