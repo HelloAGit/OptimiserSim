@@ -76,7 +76,7 @@ jobs:
           echo "DOCKERFILE_PATH=${DOCKERFILE_PATH}" >> $GITHUB_ENV
 
           # compute whether Docker Hub secrets are present (safe to reference secrets in a run step)
-          if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+          if [ -n "${{ secrets.HelloAGit }}" ] && [ -n "${{ secrets.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 }}" ]; then
             DOCKERHUB_ENABLED=true
           else
             DOCKERHUB_ENABLED=false
