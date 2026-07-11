@@ -1,212 +1,29 @@
-name: Build, push and optionally sign Docker images
+name: Publish Docker Image
 
 on:
   push:
-    branches:
-      - main
-    tags:
-      - 'v*'
-  release:
-    types:
-      - published
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Optional image tag (overrides SHA). Example: v1.2.3'
-        required: false
-      build_context:
-        description: 'Optional build context (default: .)'
-        required: false
-        default: '.'
-      dockerfile_path:
-        description: 'Optional Dockerfile path relative to repo root (default: ./Dockerfile)'
-        required: false
-        default: './Dockerfile'
-
-permissions:
-  contents: read
-  packages: write
-  id-token: write
-
-concurrency:
-  group: ghcr-build-${{ github.ref }}
-  cancel-in-progress: true
+    branches: [ "main" ]
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    env:
-      SIGN_IMAGE: 'false'
+
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Compute image repo names (lowercase owner), build variables and export to env
-        run: |
-          set -euo pipefail
-          OWNER="${{ github.repository_owner }}"
-          OWNER_LOWER=$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')
-
-          # Set shell variables (avoid unbound variable when using set -u)
-          IMAGE_REPO="ghcr.io/${OWNER_LOWER}/agent"
-          DOCKERHUB_REPO="docker.io/${OWNER_LOWER}/agent"
-
-          # Persist to subsequent steps
-          echo "OWNER_LOWER=${OWNER_LOWER}" >> $GITHUB_ENV
-          echo "IMAGE_REPO=${IMAGE_REPO}" >> $GITHUB_ENV
-          echo "DOCKERHUB_REPO=${DOCKERHUB_REPO}" >> $GITHUB_ENV
-
-          # Build context and Dockerfile path (workflow_dispatch inputs may be empty for push events)
-          BUILD_CONTEXT_INPUT="${{ github.event.inputs.build_context }}"
-          DOCKERFILE_INPUT="${{ github.event.inputs.dockerfile_path }}"
-
-          if [ -z "$BUILD_CONTEXT_INPUT" ] || [ "$BUILD_CONTEXT_INPUT" = 'null' ]; then
-            BUILD_CONTEXT='.'
-          else
-            BUILD_CONTEXT="$BUILD_CONTEXT_INPUT"
-          fi
-
-          if [ -z "$DOCKERFILE_INPUT" ] || [ "$DOCKERFILE_INPUT" = 'null' ]; then
-            DOCKERFILE_PATH='./Dockerfile'
-          else
-            DOCKERFILE_PATH="$DOCKERFILE_INPUT"
-          fi
-
-          echo "BUILD_CONTEXT=${BUILD_CONTEXT}" >> $GITHUB_ENV
-          echo "DOCKERFILE_PATH=${DOCKERFILE_PATH}" >> $GITHUB_ENV
-
-          # compute whether Docker Hub secrets are present (safe to reference secrets in a run step)
-          if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
-            DOCKERHUB_ENABLED=true
-          else
-            DOCKERHUB_ENABLED=false
-          fi
-          echo "DOCKERHUB_ENABLED=${DOCKERHUB_ENABLED}" >> $GITHUB_ENV
-
-          # Informational log (now safe because variables are set)
-          echo "Computed IMAGE_REPO=${IMAGE_REPO} BUILD_CONTEXT=${BUILD_CONTEXT} DOCKERHUB_ENABLED=${DOCKERHUB_ENABLED}"
-
-      - name: Show repo root (for debugging)
-        run: |
-          echo "Workspace: $GITHUB_WORKSPACE"
-          ls -la
-
-      - name: Verify build context and required files (fail fast)
-        run: |
-          set -euo pipefail
-          echo "Verifying build context: ${BUILD_CONTEXT} and Dockerfile: ${DOCKERFILE_PATH}"
-          if [ ! -d "${BUILD_CONTEXT}" ] && [ ! -f "${BUILD_CONTEXT}" ]; then
-            echo "ERROR: Build context '${BUILD_CONTEXT}' does not exist in the repository root."
-            exit 1
-          fi
-
-          if [ ! -f "${DOCKERFILE_PATH}" ]; then
-            echo "ERROR: Dockerfile not found at path: ${DOCKERFILE_PATH}"
-            echo "Update the workflow 'dockerfile_path' input or move your Dockerfile to this location."
-            exit 1
-          fi
-
-          # If Dockerfile references requirements.txt, ensure it exists in the context
-          if grep -qi "COPY .*requirements.txt" "${DOCKERFILE_PATH}"; then
-            REQ_RELATIVE="requirements.txt"
-            if [ ! -f "${BUILD_CONTEXT}/${REQ_RELATIVE}" ]; then
-              echo "ERROR: Dockerfile copies requirements.txt but ${BUILD_CONTEXT}/${REQ_RELATIVE} does not exist."
-              echo "Options: add requirements.txt to the build context, update the Dockerfile COPY path, or set build_context to the correct directory."
-              exit 1
-            fi
-          else
-            echo "Dockerfile does not COPY requirements.txt — skipping requirements check."
-          fi
-
-          echo "Build context verification passed."
-
-      - name: Set up QEMU (for multi-arch builds)
-        uses: docker/setup-qemu-action@v2
-
-      - name: Set up buildx
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to GHCR
+      - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.CR_PAT || github.token }}
-
-      - name: Optionally login to Docker Hub
-        if: env.DOCKERHUB_ENABLED == 'true'
-        uses: docker/login-action@v3
-        with:
-          registry: docker.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Determine image tag(s) and sanitize branch/tag
-        id: tag
-        run: |
-          set -euo pipefail
-          if [ -n "${{ github.event.inputs.tag }}" ]; then
-            echo "IMAGE_TAG=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event_name }}" = "release" ] || [ "${{ github.ref_type }}" = "tag" ]; then
-            TAG_NAME=${GITHUB_REF#refs/tags/}
-            SANITIZED_TAG=$(echo "$TAG_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g')
-            echo "IMAGE_TAG=$SANITIZED_TAG" >> $GITHUB_OUTPUT
-          else
-            SHORT_SHA=${GITHUB_SHA::8}
-            BRANCH=${GITHUB_REF#refs/heads/}
-            BRANCH_SANITIZED=$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g')
-            DATE_TAG=$(date -u +'%Y%m%d%H%M%S')
-            echo "IMAGE_TAG=$SHORT_SHA" >> $GITHUB_OUTPUT
-            echo "BRANCH_TAG=$BRANCH_SANITIZED" >> $GITHUB_OUTPUT
-            echo "DATE_TAG=$DATE_TAG" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Validate image name and tag (fail fast on invalid names)
-        run: |
-          set -euo pipefail
-          IMAGE_REPO="${IMAGE_REPO:-}"
-          IMAGE_TAG="${{ steps.tag.outputs.IMAGE_TAG }}"
-          FULL_TAG="${IMAGE_REPO}:${IMAGE_TAG}"
-          echo "Validating image repo: $IMAGE_REPO and tag: $IMAGE_TAG"
-          if echo "$FULL_TAG" | grep -q '[A-Z]'; then
-            echo "ERROR: Image name or tag contains uppercase letters. Docker image names and tags must be lowercase."
-            echo "Offending: $FULL_TAG"
-            exit 1
-          fi
-          if echo "$FULL_TAG" | grep -Eq "[^a-z0-9._\\-/:]"; then
-            echo "ERROR: Image name or tag contains invalid characters. Allowed: a-z, 0-9, ., _, -, /, :"
-            echo "Offending: $FULL_TAG"
-            exit 1
-          fi
-          echo "Image name and tag look valid."
-
-      - name: Build and push (with registry cache)
-        uses: docker/build-push-action@v4
+      - name: Build and push image
+        uses: docker/build-push-action@v5
         with:
-          context: ${{ env.BUILD_CONTEXT }}
-          file: ${{ env.DOCKERFILE_PATH }}
+          context: .
           push: true
-          platforms: linux/amd64,linux/arm64
-          cache-from: type=registry,ref=${{ env.IMAGE_REPO }}:cache
-          cache-to: type=registry,ref=${{ env.IMAGE_REPO }}:cache,mode=max
-          tags: |
-            ${{ env.IMAGE_REPO }}:${{ steps.tag.outputs.IMAGE_TAG }}
-            ${{ env.IMAGE_REPO }}:latest
-            ${{ env.IMAGE_REPO }}:${{ steps.tag.outputs.BRANCH_TAG || '' }}
-            ${{ env.IMAGE_REPO }}:${{ steps.tag.outputs.DATE_TAG || '' }}
-            ${{ env.DOCKERHUB_REPO }}:${{ steps.tag.outputs.IMAGE_TAG }}
-            ${{ env.DOCKERHUB_REPO }}:latest
-
-      - name: Sign image with cosign (keyless, optional)
-        if: env.SIGN_IMAGE == 'true' || github.event_name == 'release'
-        run: |
-          docker run --rm -e COSIGN_EXPERIMENTAL=1 -v $HOME/.docker:/root/.docker sigstore/cosign:latest sign --keyless ${IMAGE_REPO}:${{ steps.tag.outputs.IMAGE_TAG }}
-
-      - name: Post-push info
-        run: |
-          echo "Image pushed:"
-          echo "  GHCR: ${IMAGE_REPO}:${{ steps.tag.outputs.IMAGE_TAG }}"
-          echo "  GHCR latest: ${IMAGE_REPO}:latest"
-          if [ "${DOCKERHUB_ENABLED:-false}" = "true" ]; then
-            echo "  Docker Hub: ${DOCKERHUB_REPO}:${{ steps.tag.outputs.IMAGE_TAG }}"
-          fi
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/optimisersim:latest
