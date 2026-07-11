@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 from loguru import logger
 from datetime import datetime
 
-from .analyzer import QueryAnalyzer
+from .analyser import QueryAnalyzer
 from .model_registry import ModelRegistry
 from .accuracy_monitor import AccuracyMonitor
 from .cost_tracker import CostTracker
