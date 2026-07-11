@@ -20,6 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy requirements file
 COPY requirements.txt .
 
+# Copy requirements file
+COPY requirements.txt .
+
 # Install Python dependencies
 RUN pip install --upgrade pip && \
     pip install -r requirements.txt
