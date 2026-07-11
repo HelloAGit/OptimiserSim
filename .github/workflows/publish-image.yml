@@ -46,33 +46,45 @@ jobs:
           set -euo pipefail
           OWNER="${{ github.repository_owner }}"
           OWNER_LOWER=$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')
-          echo "OWNER_LOWER=$OWNER_LOWER" >> $GITHUB_ENV
-          echo "IMAGE_REPO=ghcr.io/$OWNER_LOWER/agent" >> $GITHUB_ENV
-          echo "DOCKERHUB_REPO=docker.io/$OWNER_LOWER/agent" >> $GITHUB_ENV
+
+          # Set shell variables (avoid unbound variable when using set -u)
+          IMAGE_REPO="ghcr.io/${OWNER_LOWER}/agent"
+          DOCKERHUB_REPO="docker.io/${OWNER_LOWER}/agent"
+
+          # Persist to subsequent steps
+          echo "OWNER_LOWER=${OWNER_LOWER}" >> $GITHUB_ENV
+          echo "IMAGE_REPO=${IMAGE_REPO}" >> $GITHUB_ENV
+          echo "DOCKERHUB_REPO=${DOCKERHUB_REPO}" >> $GITHUB_ENV
 
           # Build context and Dockerfile path (workflow_dispatch inputs may be empty for push events)
           BUILD_CONTEXT_INPUT="${{ github.event.inputs.build_context }}"
           DOCKERFILE_INPUT="${{ github.event.inputs.dockerfile_path }}"
+
           if [ -z "$BUILD_CONTEXT_INPUT" ] || [ "$BUILD_CONTEXT_INPUT" = 'null' ]; then
             BUILD_CONTEXT='.'
           else
             BUILD_CONTEXT="$BUILD_CONTEXT_INPUT"
           fi
+
           if [ -z "$DOCKERFILE_INPUT" ] || [ "$DOCKERFILE_INPUT" = 'null' ]; then
             DOCKERFILE_PATH='./Dockerfile'
           else
             DOCKERFILE_PATH="$DOCKERFILE_INPUT"
           fi
-          echo "BUILD_CONTEXT=$BUILD_CONTEXT" >> $GITHUB_ENV
-          echo "DOCKERFILE_PATH=$DOCKERFILE_PATH" >> $GITHUB_ENV
+
+          echo "BUILD_CONTEXT=${BUILD_CONTEXT}" >> $GITHUB_ENV
+          echo "DOCKERFILE_PATH=${DOCKERFILE_PATH}" >> $GITHUB_ENV
 
           # compute whether Docker Hub secrets are present (safe to reference secrets in a run step)
           if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
-            echo "DOCKERHUB_ENABLED=true" >> $GITHUB_ENV
+            DOCKERHUB_ENABLED=true
           else
-            echo "DOCKERHUB_ENABLED=false" >> $GITHUB_ENV
+            DOCKERHUB_ENABLED=false
           fi
-          echo "Computed IMAGE_REPO=${IMAGE_REPO} BUILD_CONTEXT=${BUILD_CONTEXT} DOCKERHUB_ENABLED=${DOCKERHUB_ENABLED:-}"
+          echo "DOCKERHUB_ENABLED=${DOCKERHUB_ENABLED}" >> $GITHUB_ENV
+
+          # Informational log (now safe because variables are set)
+          echo "Computed IMAGE_REPO=${IMAGE_REPO} BUILD_CONTEXT=${BUILD_CONTEXT} DOCKERHUB_ENABLED=${DOCKERHUB_ENABLED}"
 
       - name: Show repo root (for debugging)
         run: |
