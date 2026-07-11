@@ -1,43 +1,37 @@
-# Use official Python runtime as base image
+# Lightweight Python base image
 FROM python:3.11-slim
 
-# Set working directory in container
+# Set working directory
 WORKDIR /app
 
-# Environment
+# Environment settings
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
-# Install system/build dependencies required for some Python packages (numpy, etc.)
+# Install minimal system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    gcc \
-    gfortran \
-    libopenblas-dev \
-    libblas-dev \
-    liblapack-dev \
     libffi-dev \
     libssl-dev \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy only requirements first to leverage Docker layer caching
+# Copy requirements first (better caching)
 COPY requirements.txt .
 
-# Upgrade pip and install Python dependencies
+# Install Python dependencies
 RUN pip install --upgrade pip setuptools wheel && \
     pip install -r requirements.txt
 
-# Copy application source
+# Copy application code
 COPY . .
 
-# Expose application port
+# Expose FastAPI port
 EXPOSE 8000
 
-# Health check (requires 'requests' in requirements.txt)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD python -c "import requests, sys; resp = requests.get('http://localhost:8000/health'); sys.exit(0) if resp.status_code == 200 else sys.exit(1)"
+# Healthcheck (optional, safe)
+HEALTHCHECK CMD curl --fail http://localhost:8000/health || exit 1
 
-# Run the application
-CMD ["python", "-m", "api.main"]
+# Start FastAPI app
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
