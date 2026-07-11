@@ -23,7 +23,7 @@ jobs:
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.HelloAGit }}
-          password: ${{ secrets.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 }}
+          password: ${{ secrets.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 }}
 
       - name: Build and push image
         uses: docker/build-push-action@v5
