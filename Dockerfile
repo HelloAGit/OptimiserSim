@@ -5,11 +5,8 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Set environment variables
-# Prevents Python from writing pyc files
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    # Prevents Python from buffering stdout and stderr
     PYTHONUNBUFFERED=1 \
-    # Set pip to have no cache directory
     PIP_NO_CACHE_DIR=1
 
 # Install system dependencies
@@ -17,17 +14,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements file
-COPY requirements.txt .
-
-# Copy requirements file
+# Copy requirements file first (layer caching benefit)
 COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --upgrade pip && \
     pip install -r requirements.txt
 
-# Copy the entire application
+# Copy the entire application (after dependencies are installed)
 COPY . .
 
 # Expose the port the app runs on
