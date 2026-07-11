@@ -1,114 +1,36 @@
-# OptimiserSim
+# syntax=docker/dockerfile:1
+FROM python:3.11-slim-bookworm
 
-OptimiserSim is a FastAPI-based model router that selects the lowest-cost Fireworks AI model likely to satisfy a target accuracy threshold. It estimates token usage, routes queries, and exposes metrics for cost and model selection.
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PORT=8000
 
-## Repository structure
+WORKDIR /app
 
-* `api/main.py` — FastAPI entry point
-* `src/` — routing, analysis, metrics, and model registry logic
-* `config.yaml` — application configuration
-* `requirements.txt` — Python dependencies
-* `Dockerfile` — container build for deployment
+RUN groupadd --system appuser \
+    && useradd --system --gid appuser --create-home appuser
 
-## Local run
+COPY requirements.txt ./requirements.txt
+RUN python -m pip install --upgrade pip setuptools wheel \
+    && python -m pip install --prefer-binary -r requirements.txt
 
-```bash
-git clone https://github.com/HelloAGit/OptimiserSim.git
-cd OptimiserSim
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-export FIREWORKS_API_KEY="your_api_key"
-python -m api.main
-```
+COPY api ./api
+COPY src ./src
+COPY config.yaml ./config.yaml
 
-The API will start on:
+RUN touch api/__init__.py src/__init__.py \
+    && chown -R appuser:appuser /app
 
-* `http://127.0.0.1:8000`
+USER appuser
 
-Health check:
+RUN python -m compileall -q api src
+RUN python -c "from api.main import app; print(app.title)"
 
-* `GET /health`
+EXPOSE 8000
 
-## API endpoints
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)" || exit 1
 
-* `GET /health` — service health
-* `POST /route` — returns selected model and estimated token/cost values
-* `POST /execute` — routes and executes the query
-* `GET /metrics` — routing and cost metrics
-* `GET /models` — available model registry
-
-## Example request
-
-```bash
-curl -X POST "http://127.0.0.1:8000/route" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "Summarize the main causes of the French Revolution.",
-    "accuracy_threshold": 0.85,
-    "stream": false
-  }'
-```
-
-## Docker run
-
-Build:
-
-```bash
-docker build -t optimisersim .
-```
-
-Run:
-
-```bash
-docker run --rm -p 8000:8000 \
-  -e FIREWORKS_API_KEY="your_api_key" \
-  optimisersim
-```
-
-Then verify:
-
-```bash
-curl http://127.0.0.1:8000/health
-```
-
-## Deployment notes for Natively AI
-
-* Application entry point: `api.main:app`
-* Container port: `8000`
-* Health endpoint: `/health`
-* Required environment variable: `FIREWORKS_API_KEY`
-
-Before submitting, confirm:
-
-1. The container builds successfully.
-2. The app starts without import or config errors.
-3. `GET /health` returns HTTP 200.
-4. The Fireworks API key is configured in the deployment environment.
-
-## Troubleshooting
-
-### INFRA_ERROR during scoring
-
-This usually means the deployment platform could not build, start, or health-check the app.
-
-Check the following:
-
-* Docker image builds successfully
-* `requirements.txt` installs without errors
-* `config.yaml` is present in the image
-* `FIREWORKS_API_KEY` is set in the runtime environment
-* The app binds to `0.0.0.0` on port `8000`
-* `/health` responds with HTTP 200
-
-### Missing API key
-
-If requests to `/execute` fail, confirm that the runtime environment includes:
-
-```bash
-FIREWORKS_API_KEY=your_api_key
-```
-
-## License
-
-MIT
+CMD ["sh", "-c", "exec uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
