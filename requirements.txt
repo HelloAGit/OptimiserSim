@@ -1,1 +1,8 @@
-fastapi uvicorn pydantic aiohttp loguru numpy pyyaml requests
+fastapi
+uvicorn
+pydantic
+aiohttp
+loguru
+numpy
+pyyaml
+requests
