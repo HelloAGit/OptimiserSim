@@ -20,8 +20,11 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# Copy the entire application (after dependencies are installed)
-COPY . .
+# Upgrade pip
+RUN pip install --upgrade pip
+
+# Install Python dependencies
+RUN pip install -r requirements.txt
 
 # Expose the port the app runs on
 EXPOSE 8000
