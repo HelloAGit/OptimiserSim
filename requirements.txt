@@ -1,6 +1,1 @@
-COPY . . RUN pip install --upgrade pip &&
-if [ -f requirements.txt ]; then
-pip install -r requirements.txt;
-else
-pip install fastapi uvicorn pydantic aiohttp loguru numpy pyyaml requests;
-fi
+fastapi uvicorn pydantic aiohttp loguru numpy pyyaml requests
