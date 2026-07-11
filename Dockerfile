@@ -14,7 +14,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
     gfortran \
-    libatlas-base-dev \
     libopenblas-dev \
     libblas-dev \
     liblapack-dev \
